@@ -1,5 +1,5 @@
--- Connected Discord-GitHub
-
+--// Services
+-- Services are stored at the top so the script is organized and easy to maintain.
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
@@ -7,9 +7,13 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
+--// Spawner References
+-- The script is expected to be placed inside the ball spawner part.
 local spawnerPart = script.Parent
 local spawnerPrompt = spawnerPart:WaitForChild("ProximityPrompt")
 
+--// Configuration
+-- These constants control gameplay balance and make the script easier to adjust later.
 local MAX_BALLS = 10
 local THROW_POWER = 105
 local BALL_LIFETIME = 25
@@ -18,6 +22,8 @@ local SHOCKWAVE_RADIUS = 18
 local MAX_BOUNCE_CHARGE = 5
 local COOLDOWN_TIME = 0.35
 
+--// Remote Event
+-- The remote event allows clients to request a throw direction while the server keeps authority.
 local throwEvent = ReplicatedStorage:FindFirstChild("ThrowBallEvent")
 
 if not throwEvent then
@@ -26,28 +32,41 @@ if not throwEvent then
 	throwEvent.Parent = ReplicatedStorage
 end
 
+--// Ball System Class
+-- The system is stored in a table to keep related functions and state grouped together.
 local BallSystem = {}
 BallSystem.__index = BallSystem
 
 function BallSystem.new()
 	local self = setmetatable({}, BallSystem)
+
+	-- Tracks active world balls so the visual heartbeat only updates valid balls.
 	self.ActiveBalls = {}
+
+	-- Tracks player cooldowns to prevent throwing spam.
 	self.Cooldowns = {}
+
+	-- Used to give each spawned ball a unique spawn index.
 	self.SpawnedCount = 0
+
 	return self
 end
 
 local system = BallSystem.new()
 
+-- Checks if a player is still inside the throw cooldown window.
 function BallSystem:IsCoolingDown(player)
 	local lastUse = self.Cooldowns[player] or 0
 	return os.clock() - lastUse < COOLDOWN_TIME
 end
 
+-- Stores the current time as the players latest throw time.
 function BallSystem:SetCooldown(player)
 	self.Cooldowns[player] = os.clock()
 end
 
+-- Creates leaderstats if they do not exist yet.
+-- This keeps stats creation centralized instead of repeating it in multiple places.
 function BallSystem:GetPlayerStats(player)
 	local stats = player:FindFirstChild("leaderstats")
 
@@ -74,6 +93,7 @@ function BallSystem:GetPlayerStats(player)
 	return stats
 end
 
+-- Safely adds to a leaderstat value if the stat exists.
 function BallSystem:AddStat(player, statName, amount)
 	local stats = self:GetPlayerStats(player)
 	local stat = stats:FindFirstChild(statName)
@@ -83,6 +103,8 @@ function BallSystem:AddStat(player, statName, amount)
 	end
 end
 
+-- Counts all ball tools the player currently owns.
+-- Both Backpack and Character are checked because equipped tools move into the character.
 function BallSystem:CountBalls(player)
 	local count = 0
 
@@ -105,6 +127,7 @@ function BallSystem:CountBalls(player)
 	return count
 end
 
+-- Creates a temporary sound and cleans it up automatically.
 function BallSystem:PlaySound(parent, soundId, volume, pitch)
 	local sound = Instance.new("Sound")
 	sound.SoundId = soundId
@@ -112,10 +135,14 @@ function BallSystem:PlaySound(parent, soundId, volume, pitch)
 	sound.PlaybackSpeed = pitch or 1
 	sound.Parent = parent
 	sound:Play()
+
+	-- Debris prevents unused sound instances from building up in the workspace.
 	Debris:AddItem(sound, 4)
+
 	return sound
 end
 
+-- Applies the shared visual style used by both tool balls and world balls.
 function BallSystem:ApplyToonLook(ball)
 	ball.Material = Enum.Material.SmoothPlastic
 	ball.Color = Color3.fromRGB(105, 145, 255)
@@ -128,6 +155,7 @@ function BallSystem:ApplyToonLook(ball)
 	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
 	highlight.Parent = ball
 
+	-- Attachments are used as endpoints for the trail effect.
 	local attachment0 = Instance.new("Attachment")
 	attachment0.Name = "TrailStart"
 	attachment0.Position = Vector3.new(0, 0.6, 0)
@@ -149,6 +177,7 @@ function BallSystem:ApplyToonLook(ball)
 	trail.Parent = ball
 end
 
+-- Creates an expanding forcefield sphere to show the shockwave area visually.
 function BallSystem:CreatePulseEffect(position, radius)
 	local pulse = Instance.new("Part")
 	pulse.Name = "ShockwavePulse"
@@ -177,6 +206,7 @@ function BallSystem:CreatePulseEffect(position, radius)
 	Debris:AddItem(pulse, 0.55)
 end
 
+-- Displays short feedback above a position, such as pickup or inventory messages.
 function BallSystem:CreateFloatingText(position, text)
 	local holder = Instance.new("Part")
 	holder.Name = "FloatingTextHolder"
@@ -232,6 +262,8 @@ function BallSystem:CreateFloatingText(position, text)
 	Debris:AddItem(holder, 1.2)
 end
 
+-- Predicts where a thrown ball will land using projectile motion and raycasts.
+-- This gives the player visual feedback before the actual ball lands.
 function BallSystem:PredictLandingPoint(startPosition, velocity)
 	local gravity = workspace.Gravity
 	local timeStep = 0.08
@@ -239,12 +271,17 @@ function BallSystem:PredictLandingPoint(startPosition, velocity)
 
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	-- Pickup balls are ignored so the prediction checks the map instead of other balls.
 	rayParams.FilterDescendantsInstances = CollectionService:GetTagged("PickupBall")
 
 	for step = 1, 40 do
 		local t = step * timeStep
+
+		-- Projectile formula: position + velocity*time + gravity effect.
 		local nextPosition = startPosition + velocity * t + Vector3.new(0, -0.5 * gravity * t * t, 0)
 		local direction = nextPosition - lastPosition
+
 		local result = workspace:Raycast(lastPosition, direction, rayParams)
 
 		if result then
@@ -257,6 +294,7 @@ function BallSystem:PredictLandingPoint(startPosition, velocity)
 	return lastPosition, Vector3.yAxis
 end
 
+-- Creates a temporary ring showing the predicted landing point.
 function BallSystem:ShowLandingMarker(position, normal)
 	local marker = Instance.new("Part")
 	marker.Name = "PredictedLandingMarker"
@@ -269,6 +307,8 @@ function BallSystem:ShowLandingMarker(position, normal)
 	marker.Material = Enum.Material.Neon
 	marker.Color = Color3.fromRGB(120, 190, 255)
 	marker.Transparency = 0.35
+
+	-- Aligns the marker to the surface normal so it sits correctly on slopes.
 	marker.CFrame = CFrame.lookAt(position, position + normal) * CFrame.Angles(0, math.rad(90), 0)
 	marker.Parent = workspace
 
@@ -285,6 +325,8 @@ function BallSystem:ShowLandingMarker(position, normal)
 	Debris:AddItem(marker, 0.9)
 end
 
+-- Applies an area impulse to nearby physics objects and characters.
+-- Charge increases both the range and strength of the shockwave.
 function BallSystem:ApplyShockwave(center, owner, charge)
 	local radius = SHOCKWAVE_RADIUS + charge * 2
 
@@ -295,6 +337,8 @@ function BallSystem:ApplyShockwave(center, owner, charge)
 			local offset = part.Position - center
 			local distance = math.max(offset.Magnitude, 1)
 			local direction = offset.Unit
+
+			-- Objects closer to the center receive more force.
 			local strength = (radius - distance) / radius
 			local impulse = direction * strength * part.AssemblyMass * (80 + charge * 30)
 
@@ -305,9 +349,11 @@ function BallSystem:ApplyShockwave(center, owner, charge)
 		local humanoid = model and model:FindFirstChildOfClass("Humanoid")
 		local root = model and model:FindFirstChild("HumanoidRootPart")
 
+		-- Characters are handled separately so their root part receives clean knockback.
 		if humanoid and root and owner and model ~= owner.Character then
 			local offset = root.Position - center
 			local direction = offset.Magnitude > 0 and offset.Unit or Vector3.yAxis
+
 			root:ApplyImpulse((direction + Vector3.new(0, 0.35, 0)) * root.AssemblyMass * (85 + charge * 20))
 		end
 	end
@@ -317,6 +363,7 @@ function BallSystem:ApplyShockwave(center, owner, charge)
 	end
 end
 
+-- Creates the ball tool that the player can hold and activate.
 function BallSystem:CreateTool(player)
 	local tool = Instance.new("Tool")
 	tool.Name = "Ball"
@@ -349,9 +396,11 @@ function BallSystem:CreateTool(player)
 			return
 		end
 
+		-- The server throws using the characters current look direction.
 		self:ThrowBall(player, root.CFrame.LookVector)
 	end)
 
+	-- Disconnecting prevents old connections from staying alive after the tool is destroyed.
 	tool.Destroying:Connect(function()
 		if activatedConnection then
 			activatedConnection:Disconnect()
@@ -361,6 +410,7 @@ function BallSystem:CreateTool(player)
 	return tool
 end
 
+-- Converts a world ball into a tool if the player has inventory space.
 function BallSystem:PickupBall(player, ball)
 	if not ball or not ball.Parent then
 		return
@@ -382,6 +432,8 @@ function BallSystem:PickupBall(player, ball)
 	ball:Destroy()
 end
 
+-- Creates a physical ball in the world.
+-- This is used both by the spawner and by thrown tools.
 function BallSystem:MakeWorldBall(position, velocity, owner)
 	self.SpawnedCount += 1
 
@@ -428,6 +480,7 @@ function BallSystem:MakeWorldBall(position, velocity, owner)
 	local lastHit = 0
 
 	ball.Touched:Connect(function(hit)
+		-- Small debounce prevents one collision from rapidly charging the ball multiple times.
 		if os.clock() - lastHit < 0.12 then
 			return
 		end
@@ -442,12 +495,14 @@ function BallSystem:MakeWorldBall(position, velocity, owner)
 		charge = math.clamp(charge + 1, 0, MAX_BOUNCE_CHARGE)
 		ball:SetAttribute("BounceCharge", charge)
 
+		-- The ball grows and brightens as it becomes more charged.
 		local scale = 1 + charge * 0.08
 		ball.Size = Vector3.new(2, 2, 2) * scale
 		ball.Color = Color3.fromRGB(math.clamp(105 + charge * 20, 0, 255), 145, 255)
 
 		self:PlaySound(ball, "rbxassetid://12221967", 0.45, 1 + charge * 0.06)
 
+		-- Once fully charged, the ball releases a shockwave and resets.
 		if charge >= MAX_BOUNCE_CHARGE then
 			local ownerUserId = ball:GetAttribute("OwnerUserId")
 			local ownerPlayer = ownerUserId ~= 0 and Players:GetPlayerByUserId(ownerUserId) or nil
@@ -466,11 +521,13 @@ function BallSystem:MakeWorldBall(position, velocity, owner)
 		self.ActiveBalls[ball] = nil
 	end)
 
+	-- Removes old world balls automatically to prevent clutter and performance issues.
 	Debris:AddItem(ball, BALL_LIFETIME)
 
 	return ball
 end
 
+-- Throws the players equipped ball into the world.
 function BallSystem:ThrowBall(player, direction)
 	if self:IsCoolingDown(player) then
 		return
@@ -508,6 +565,8 @@ function BallSystem:ThrowBall(player, direction)
 	local aimDirection = direction.Unit
 	local spawnCFrame = root.CFrame * CFrame.new(0, 1.5, -3)
 	local spawnPosition = spawnCFrame.Position
+
+	-- Extra upward velocity makes the throw feel more arced and readable.
 	local velocity = aimDirection * THROW_POWER + Vector3.new(0, 14, 0)
 
 	local landingPosition, landingNormal = self:PredictLandingPoint(spawnPosition, velocity)
@@ -521,6 +580,7 @@ function BallSystem:ThrowBall(player, direction)
 	self:PlaySound(root, "rbxassetid://12221967", 0.6, 1.2)
 end
 
+-- Configures the spawner prompt and handles spawning balls into the world.
 function BallSystem:SetupSpawner()
 	spawnerPrompt.ActionText = "Spawn Ball"
 	spawnerPrompt.ObjectText = "Advanced Ball Spawner"
@@ -529,6 +589,7 @@ function BallSystem:SetupSpawner()
 	spawnerPrompt.MaxActivationDistance = 10
 
 	spawnerPrompt.Triggered:Connect(function(player)
+		-- Random offset and velocity make each spawned ball feel less static.
 		local offset = Vector3.new(math.random(-3, 3), 5, math.random(-3, 3))
 		local velocity = Vector3.new(math.random(-12, 12), 22, math.random(-12, 12))
 		local ball = self:MakeWorldBall(spawnerPart.Position + offset, velocity, player)
@@ -538,6 +599,7 @@ function BallSystem:SetupSpawner()
 	end)
 end
 
+-- Sets up player data and clears cooldowns when the player dies.
 function BallSystem:SetupPlayer(player)
 	self:GetPlayerStats(player)
 
@@ -552,6 +614,8 @@ function BallSystem:SetupPlayer(player)
 	end)
 end
 
+-- Updates small visual effects on active balls.
+-- Heartbeat is used because this is a continuous server-side visual update.
 function BallSystem:StartVisualLoop()
 	RunService.Heartbeat:Connect(function()
 		for ball in self.ActiveBalls do
@@ -564,6 +628,7 @@ function BallSystem:StartVisualLoop()
 					highlight.OutlineTransparency = math.clamp(0.15 - charge * 0.02 + pulse, 0, 0.7)
 				end
 
+				-- Charged balls spin slightly faster to communicate stored energy.
 				if charge > 0 then
 					ball.AssemblyAngularVelocity += Vector3.new(0, charge * 0.02, 0)
 				end
@@ -574,6 +639,7 @@ function BallSystem:StartVisualLoop()
 	end)
 end
 
+--// Player Setup
 Players.PlayerAdded:Connect(function(player)
 	system:SetupPlayer(player)
 end)
@@ -586,9 +652,12 @@ for _, player in Players:GetPlayers() do
 	system:SetupPlayer(player)
 end
 
+--// Remote Throw Handling
+-- The server validates the request before actually throwing the ball.
 throwEvent.OnServerEvent:Connect(function(player, direction)
 	system:ThrowBall(player, direction)
 end)
 
+--// Start System
 system:SetupSpawner()
 system:StartVisualLoop()
