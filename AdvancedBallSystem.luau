@@ -1,3 +1,24 @@
+--[[
+	Advanced Server Ball System
+
+	This script controls a complete ball spawning and throwing system.
+	It handles:
+	- Server-side ball spawning
+	- Player inventory limits
+	- Ball pickup tools
+	- Throw cooldowns
+	- Projectile landing prediction
+	- Bounce charging
+	- Shockwave physics
+	- Floating text feedback
+	- Temporary visual effects
+	- Player leaderstats
+
+	Most gameplay logic is handled on the server so players cannot easily
+	exploit the system by creating fake balls, skipping cooldowns, or giving
+	themselves extra inventory.
+]]
+
 --// Services
 -- Services are stored at the top so the script is organized and easy to maintain.
 local TweenService = game:GetService("TweenService")
