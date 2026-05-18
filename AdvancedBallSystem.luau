@@ -1,22 +1,22 @@
 --[[
-	Advanced Server Ball System
+	Advanced Ball System
 
-	This script controls a complete ball spawning and throwing system.
-	It handles:
-	- Server-side ball spawning
-	- Player inventory limits
-	- Ball pickup tools
-	- Throw cooldowns
-	- Projectile landing prediction
-	- Bounce charging
-	- Shockwave physics
-	- Floating text feedback
-	- Temporary visual effects
-	- Player leaderstats
+	Description:
+	This system handles ball spawning, pickups, inventory limits,
+	throwing, projectile prediction, bounce charging, shockwaves,
+	visual effects, cooldown validation, and player leaderstats.
 
-	Most gameplay logic is handled on the server so players cannot easily
-	exploit the system by creating fake balls, skipping cooldowns, or giving
-	themselves extra inventory.
+	Architecture:
+	- Server-authoritative gameplay logic
+	- Reusable BallSystem methods
+	- Organized service/configuration sections
+	- Inline comments explaining system behavior
+	- Automatic cleanup using Debris service
+
+	Security:
+	Important gameplay actions are validated on the server
+	to reduce exploit abuse such as cooldown bypassing,
+	fake ball creation, or inventory manipulation.
 ]]
 
 --// Services
